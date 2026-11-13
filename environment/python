@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Relocatable S5 interpreter. No activation of the original system/temporary venv.
+set -euo pipefail
+# Select the host-compatible runtime; retain the original PPU snapshot below.
+case "${GRN_S5_RUNTIME:-auto}" in
+  maca) exec "$(dirname -- "${BASH_SOURCE[0]}")/python-maca" "$@" ;;
+  auto)
+    if [[ -e /dev/mxcd && -d "${MACA_PATH:-/opt/maca}/lib" ]]; then
+      exec "$(dirname -- "${BASH_SOURCE[0]}")/python-maca" "$@"
+    fi ;;
+  ppu) ;;
+  *) printf '%s\n' 'GRN_S5_RUNTIME must be auto, maca, or ppu' >&2; exit 2 ;;
+esac
+S5_ENV_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+S5_BUNDLE_ROOT="$(cd -- "${S5_ENV_ROOT}/.." && pwd -P)"
+if [[ ! -f "${S5_ENV_ROOT}/snapshot_summary.json" ]]; then
+  printf '%s\n' 'The GRN_S5 environment snapshot is not complete; see environment/snapshot_build.log.' >&2
+  exit 1
+fi
+export GRN_S5_ENV_ROOT="${S5_ENV_ROOT}"
+export PYTHONHOME="${S5_ENV_ROOT}/runtime"
+export PYTHONPATH="${S5_ENV_ROOT}/bootstrap:${S5_ENV_ROOT}/overlay/lib/python3.12/site-packages:${S5_BUNDLE_ROOT}/scripts"
+export PYTHONNOUSERSITE=1
+export PYTHONDONTWRITEBYTECODE=1
+unset PYTHONPYCACHEPREFIX
+export PYTHONUNBUFFERED=1
+export PPU_SDK="${S5_ENV_ROOT}/PPU_SDK"
+export CUDA_HOME="${PPU_SDK}/CUDA_SDK"
+export CUDA_PATH="${CUDA_HOME}"
+export CUDA_TOOLKIT_ROOT="${CUDA_HOME}"
+export LD_LIBRARY_PATH="${S5_ENV_ROOT}/runtime/lib:${S5_ENV_ROOT}/runtime/lib/python3.12/site-packages/torch/lib:${CUDA_HOME}/lib64:${PPU_SDK}/lib:${PPU_SDK}/sailSHMEM/lib"
+export LIBRARY_PATH="${LD_LIBRARY_PATH}"
+export PATH="${S5_ENV_ROOT}/bin:${S5_ENV_ROOT}/runtime/bin:${CUDA_HOME}/bin:${PPU_SDK}/bin:/usr/bin:/bin"
+export TORCH_HOME="${S5_BUNDLE_ROOT}/protocol/offline_cache/torch"
+export HF_HOME="${S5_BUNDLE_ROOT}/protocol/offline_cache/huggingface"
+export HF_HUB_CACHE="${HF_HOME}/hub"
+export HUGGINGFACE_HUB_CACHE="${HF_HUB_CACHE}"
+export PYIQA_CACHE_DIR="${S5_BUNDLE_ROOT}/protocol/offline_cache/pyiqa"
+export CLIP_CACHE_DIR="${S5_BUNDLE_ROOT}/protocol/offline_cache/clip"
+export XDG_CACHE_HOME="${S5_ENV_ROOT}/runtime_cache"
+export TRITON_CACHE_DIR="${XDG_CACHE_HOME}/triton"
+export TORCH_EXTENSIONS_DIR="${XDG_CACHE_HOME}/torch_extensions"
+export CUDA_CACHE_PATH="${XDG_CACHE_HOME}/cuda"
+export MPLCONFIGDIR="${XDG_CACHE_HOME}/matplotlib"
+# Torch's CUDA JIT cache creates only the final directory; ensure its parent exists.
+# Every declared writable cache remains inside this relocatable environment.
+mkdir -p -- "${XDG_CACHE_HOME}/torch/kernels" "${TRITON_CACHE_DIR}" \
+  "${TORCH_EXTENSIONS_DIR}" "${CUDA_CACHE_PATH}" "${MPLCONFIGDIR}"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_OFFLINE=1
+export WANDB_MODE=offline
+export WANDB_DIR="${S5_BUNDLE_ROOT}/outputs/wandb"
+mkdir -p -- "${WANDB_DIR}"
+export PIP_NO_INDEX=1
+export TOKENIZERS_PARALLELISM=false
+export GRN_S5_ALLOW_NETWORK="${GRN_S5_ALLOW_NETWORK:-0}"
+exec "${S5_ENV_ROOT}/runtime/bin/python3.12" "$@"

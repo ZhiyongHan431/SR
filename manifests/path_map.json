@@ -1,0 +1,126 @@
+{
+  "schema": "grn_s5_path_map_v1",
+  "identity_policy": "Original manifest bytes, SHA256 and source identity strings are preserved; resolve paths for I/O only.",
+  "mappings": [
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_abc_20260910.f0nvce/inputs/native_empty_text.pt",
+      "destination_prefix": "weights/native_empty_text.pt"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_state_recovery_20260909.iYpPke/full_pairs/source_split.json",
+      "destination_prefix": "manifests/provenance/source_split.json"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_state_recovery_20260909.iYpPke/recovered_old32_exclusions.txt",
+      "destination_prefix": "manifests/provenance/recovered_old32_exclusions.txt"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_v2_20260916.QCinZF/assets/dinov2_vits14.Bidcci",
+      "destination_prefix": "weights/dinov2_vits14"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_v2_20260916.QCinZF/s3_cross_promotion.WIP",
+      "destination_prefix": "code"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_v2_20260916.QCinZF/s4_latent_alignment_ablation_20260920_crossnonepromo/S3_CROSS_LATENT_no_edge_N16000_seed3407/ar-ckpt-global_step_16000.pth",
+      "destination_prefix": "weights/s5_initialization_step_16000.pth"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_v2_20260916.QCinZF/s5_full_qualified_no_edge_20260923_retry3/GRN2B_SR4X_S5_FULL_QUALIFIED_NO_EDGE_N93854_seed3407",
+      "destination_prefix": "reference/s5_run"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_v2_20260916.QCinZF/s5_full_qualified_no_edge_20260923_retry3/GRN2B_SR4X_S5_FULL_QUALIFIED_NO_EDGE_N93854_seed3407/ar-ckpt-global_step_46928.pth",
+      "destination_prefix": "weights/ar-ckpt-global_step_46928.pth"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_v2_20260916.QCinZF/s5_full_qualified_no_edge_20260923_retry3/GRN2B_SR4X_S5_FULL_QUALIFIED_NO_EDGE_N93854_seed3407/ar-ckpt-global_step_93856.pth",
+      "destination_prefix": "weights/ar-ckpt-global_step_93856.pth"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_v2_20260916.QCinZF/s5_qualification.WF4Ur3/benchmark_pin/benchmark_protection.json",
+      "destination_prefix": "manifests/provenance/benchmark_protection.json"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_v2_20260916.QCinZF/s5_qualification.WF4Ur3/qualification_v1",
+      "destination_prefix": "manifests/qualification_v1"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_v2_20260916.QCinZF/s5_qualification.WF4Ur3/qualify_sr_originals.py",
+      "destination_prefix": "manifests/provenance/qualify_sr_originals.py"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/outputs/sr_v2_20260916.QCinZF/stage1_pilot_v2/inputs/views.json",
+      "destination_prefix": "manifests/provenance/views.json"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/weights/GRN_T2I_2B_FSA_251600.pth",
+      "destination_prefix": "weights/GRN_T2I_2B_FSA_251600.pth"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN/weights/HBQ_image_video_tokenizer_64dim_M4_20260626.ckpt",
+      "destination_prefix": "weights/HBQ_image_video_tokenizer_64dim_M4_20260626.ckpt"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU",
+      "destination_prefix": "protocol"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU/basicsr",
+      "destination_prefix": "protocol/basicsr"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU/config",
+      "destination_prefix": "protocol/config"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU/data/benchmarks/StableSR_testsets",
+      "destination_prefix": "protocol/data/benchmarks/StableSR_testsets"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU/data/manifests",
+      "destination_prefix": "protocol/data/manifests"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU/data/raw/FFHQ_Part1",
+      "destination_prefix": "protocol/data/raw/FFHQ_Part1"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU/data/raw/LSDIR",
+      "destination_prefix": "protocol/data/raw/LSDIR"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU/dataloader",
+      "destination_prefix": "protocol/dataloader"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU/models",
+      "destination_prefix": "protocol/models"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU/offline_cache/pyiqa/LPIPS_v0.1_alex-df73285e.pth",
+      "destination_prefix": "protocol/offline_cache/pyiqa/LPIPS_v0.1_alex-df73285e.pth"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU/offline_cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth",
+      "destination_prefix": "protocol/offline_cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU/scripts",
+      "destination_prefix": "protocol/scripts"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/VARSR-AlignVAR-Offline4GPU/trainer.py",
+      "destination_prefix": "protocol/trainer.py"
+    },
+    {
+      "source_prefix": "/tmp/grn_sr_eval_venv/lib/python3.12/site-packages",
+      "destination_prefix": "environment/overlay/lib/python3.12/site-packages"
+    },
+    {
+      "source_prefix": "/inspire/store/project/fdu-nicu/public/hanzhiyong/GRN_S5",
+      "destination_prefix": "."
+    }
+  ]
+}

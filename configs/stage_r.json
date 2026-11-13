@@ -1,0 +1,44 @@
+{
+  "arm": "R",
+  "lr": 5e-05,
+  "state_mix": 0.5,
+  "kappa_min": 2.0,
+  "kappa_max": 2.0,
+  "image_weight": 0.1,
+  "lpips_weight": 2.0,
+  "gram_weight": 0.0,
+  "blocks": 6,
+  "seed": 20261109,
+  "cache_sha256": "e862a84ac32e55e1eba9ab2c6d044f912225b2e066b0ff043e78009e506afc17",
+  "state_policy": "fixed_teacher_features_not_student_on_policy",
+  "degradation": "packaged_reference_RealESRGAN",
+  "initial_adapter_sha256": null,
+  "teacher_adapter_sha256": "78501eedb235f437b89da336f80a4586b2734401590b7ec96f2b2dbbc57920b8",
+  "r_input_policy": "final_frozen_teacher_latent",
+  "execution_identity": {
+    "source_sha256": {
+      "code/tools/trajectory_adaptation.py": "5da8e841277e27c52565943690fe3c01dd914114557ef04d2af737a58f41874e",
+      "code/grn/models/grn.py": "3853d641b7cec49d84cd26c098fc33471b5b24352000a9961694d067cee42434",
+      "code/grn/models/sr_v2_calibrator.py": "50660acaa0e93c64004927ee0cf09b84874b7a7d79ad4dd9c978dc76907ff020",
+      "code/grn/models/sr_latent_residual.py": "e24db0568e04a49fda87cb0f87ac8c4a44b82fa67ada068b8a3c040cd47d5db7",
+      "code/grn/utils_t2iv/sr_trajectory_adapter.py": "266c2914be63ad4992c7a11c5c9316893bfa71b2a8836ec47c6608481e0fbd79",
+      "code/tools/grn_pipeline.py": "4970673b2b2d38bd2ce11617ed5974c14d0c58e7a2b2427a021a8e2e3dbd4960",
+      "code/grn/utils_t2iv/sr_v2_image_loss.py": "4ee5c74ef76650fa7aa5442bab69bc486588eb0141ae67b2050da8158becc85b"
+    },
+    "numeric_policy": {
+      "torch": "2.6.0+metax3.7.0.7",
+      "deterministic_algorithms": true,
+      "cudnn_enabled": false,
+      "cudnn_deterministic": true,
+      "cudnn_benchmark": false,
+      "matmul_allow_tf32": false,
+      "cudnn_allow_tf32": true
+    }
+  },
+  "pairs_sha256": "350909287ca1d8c148ccb562fc4a046659abfdf5f9b485541f2e3ac10498cdee",
+  "training_source_provenance_complete": true,
+  "updates_requested": 4096,
+  "start_step": 0,
+  "trainable_parameters": 588672,
+  "scope": "Bounded fixed-teacher-state adapter training; no claim of benchmark improvement."
+}

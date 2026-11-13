@@ -1,0 +1,15 @@
+{
+  "schema": "grn_s5_bundle_v1",
+  "checkpoint": "weights/ar-ckpt-global_step_93856.pth",
+  "hbq": "weights/HBQ_image_video_tokenizer_64dim_M4_20260626.ckpt",
+  "empty_text": "weights/native_empty_text.pt",
+  "code": "code",
+  "protocol_root": "protocol",
+  "offline_cache": "protocol/offline_cache",
+  "sampling": {"steps": 50, "seed": 0, "temperature": 1.0, "guidance_scale": 1.0, "top_k": 1, "top_p": 0.75, "snr_shift": 1.0},
+  "benchmarks": {
+    "RealSR": {"relative_root": "data/benchmarks/StableSR_testsets/RealSRVal_crop128", "count": 100, "historical_predictions": "reference/s5_run/final_eval_real_drealsr_no_cfg_steps50/no_cfg/RealSR", "historical_metrics": "reference/s5_run/final_eval_real_drealsr_no_cfg_steps50/no_cfg/metrics.json"},
+    "DRealSR": {"relative_root": "data/benchmarks/StableSR_testsets/DrealSRVal_crop128", "count": 93, "historical_predictions": "reference/s5_run/final_eval_real_drealsr_no_cfg_steps50/no_cfg/DRealSR", "historical_metrics": "reference/s5_run/final_eval_real_drealsr_no_cfg_steps50/no_cfg/metrics.json"},
+    "DIV2K-Val": {"relative_root": "data/benchmarks/StableSR_testsets/DIV2K_V2_val", "count": 3000, "historical_predictions": "reference/s5_run/final_eval_div2k_val_no_cfg_steps50_20261009/no_cfg/DIV2K-Val", "historical_metrics": "reference/s5_run/final_eval_div2k_val_no_cfg_steps50_20261009/no_cfg/metrics.json"}
+  }
+}

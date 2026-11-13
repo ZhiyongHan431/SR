@@ -1,0 +1,48 @@
+{
+  "model": "S5 + trajectory-adapted C + terminal R",
+  "kappa": 2.0,
+  "state": "retained main model; not universally best on every metric",
+  "sampling": {
+    "steps": 50,
+    "seed": 0,
+    "temperature": 1.0,
+    "guidance_scale": 1.0,
+    "top_k": 1,
+    "top_p": 0.75,
+    "snr_shift": 1.0
+  },
+  "base_checkpoint": {
+    "path": "weights/ar-ckpt-global_step_93856.pth",
+    "sha256": "891f45b13fd1ac46301e76f5674d7f34316e5ff8ba723c1f05089c30e00501f6"
+  },
+  "adapter": {
+    "path": "outputs/trajectory_expanded_20261108/train_cr/adapter.pt",
+    "sha256": "42b578061e2e2758aed1b11c23506562d4cae05d5e634c95a7da04f9380760a3"
+  },
+  "architecture": {
+    "backbone": "GRN2b",
+    "depth": 28,
+    "width": 2304,
+    "heads": 18,
+    "latent_channels": 64,
+    "latent_resolution": [
+      32,
+      32
+    ],
+    "bit_planes": 4,
+    "calibrator_parameters": 337284,
+    "terminal_R_blocks": 6,
+    "terminal_R_parameters": 588672
+  },
+  "additional_multimodal_condition_enabled": false,
+  "weights_and_datasets_included": false,
+  "source_sha256": {
+    "code/tools/trajectory_adaptation.py": "5da8e841277e27c52565943690fe3c01dd914114557ef04d2af737a58f41874e",
+    "code/grn/models/grn.py": "3853d641b7cec49d84cd26c098fc33471b5b24352000a9961694d067cee42434",
+    "code/grn/models/sr_v2_calibrator.py": "50660acaa0e93c64004927ee0cf09b84874b7a7d79ad4dd9c978dc76907ff020",
+    "code/grn/models/sr_latent_residual.py": "e24db0568e04a49fda87cb0f87ac8c4a44b82fa67ada068b8a3c040cd47d5db7",
+    "code/grn/utils_t2iv/sr_trajectory_adapter.py": "266c2914be63ad4992c7a11c5c9316893bfa71b2a8836ec47c6608481e0fbd79",
+    "code/tools/grn_pipeline.py": "4970673b2b2d38bd2ce11617ed5974c14d0c58e7a2b2427a021a8e2e3dbd4960",
+    "code/grn/utils_t2iv/sr_v2_image_loss.py": "4ee5c74ef76650fa7aa5442bab69bc486588eb0141ae67b2050da8158becc85b"
+  }
+}
