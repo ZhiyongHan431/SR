@@ -80,6 +80,8 @@ def gen_one_example(
     sr_quality_guidance=None,
     sr_negative_lr_condition=None,
     sr_negative_semantic_features=None,
+    sr_text_features=None,
+    sr_negative_text_features=None,
 ):
     sstt = time.time()
     if not isinstance(cfg_list, list):
@@ -90,12 +92,26 @@ def gen_one_example(
     native_lr_input, native_lr_latent = None, None
     mode = getattr(args, 'sr_condition_mode', 'prefix')
     native_sr = lr_condition is not None and mode == 'native_adapter'
+    text_overrides = sr_text_features is not None or sr_negative_text_features is not None
+    if text_overrides and (lr_condition is None or mode != 'prefix_text'):
+        raise ValueError('Text-slot features require prefix_text SR')
     if lr_condition is not None and uses_empty_text(mode):
         if native_sr and any(float(cfg) != 1.0 for cfg in cfg_list):
             raise ValueError('native SR Stage1 requires guidance=1')
-        features = load_empty_text_cache(args.sr_native_empty_text_path, getattr(args, 'text_channels', 4096))
+        text_channels = getattr(args, 'text_channels', 4096)
+        features = load_empty_text_cache(args.sr_native_empty_text_path, text_channels)
         empty_text = pack_empty_text(features, 1, args.other_device)[:4]
         text_cond_tuple, negative_label_B_or_BLT = [empty_text], empty_text
+        if text_overrides:
+            # Opt-in: a semantic prompt or cached prompts replace the constant
+            # empty prompt of the first / second packed branch. Their lengths may differ.
+            from grn.models.sr_semantic_prompt import checked_text_features
+            if sr_text_features is not None:
+                text_cond_tuple = [pack_empty_text(
+                    checked_text_features(sr_text_features, text_channels), 1, args.other_device)[:4]]
+            if sr_negative_text_features is not None:
+                negative_label_B_or_BLT = pack_empty_text(
+                    checked_text_features(sr_negative_text_features, text_channels), 1, args.other_device)[:4]
         if native_sr:
             native_lr_input, native_lr_latent = encode_native_lr(vae, lr_condition, args.sr_hr_size, args.hbq_round)
     elif lr_condition is None:
