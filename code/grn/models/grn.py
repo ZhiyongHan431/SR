@@ -1275,7 +1275,7 @@ class GRN(nn.Module):
             if quality_guidance.needs_negative_lr:
                 if (sr_negative_lr_condition is None
                         or sr_negative_lr_condition.shape != lr_condition.shape):
-                    raise ValueError('degraded_lr guidance requires a negative LR with the LR shape')
+                    raise ValueError('Second-branch guidance requires a negative LR with the LR shape')
                 self._validate_sr_v2_semantic_condition(
                     sr_negative_lr_condition, sr_negative_semantic_features)
             elif sr_negative_lr_condition is not None or sr_negative_semantic_features is not None:

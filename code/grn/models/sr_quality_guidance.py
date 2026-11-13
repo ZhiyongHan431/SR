@@ -9,7 +9,7 @@ that full prediction away from a *lower-quality* prediction of the same bits:
 
     l_g = l_pos + clamp(w * (l_pos - l_neg), -bound, +bound) * plane_weight
 
-The negative prediction comes from one of two sources:
+The negative prediction comes from one of these sources:
 
 ``degraded_lr``  the same network conditioned on a further-degraded LR image.
                  It occupies the second packed branch that guidance=1 inference
@@ -17,6 +17,11 @@ The negative prediction comes from one of two sources:
 ``calibrator``   a second bounded calibrator (C-) trained to predict the bits of
                  a low-quality target from the same hidden states. It adds no
                  backbone forward at all.
+``prompt``       the second branch keeps the same LR anchor and differs only in
+                 its text slot (empty prompt, a learned negative token, or a
+                 cached negative prompt), while the first branch carries the
+                 semantic prompt. See ``sr_semantic_prompt``.
+``degraded_lr_prompt``  both at once: degraded LR and the negative text slot.
 
 The same config can also set per-bit-plane sampling temperatures. Plane 0 is
 the most significant HBQ plane (interval 1/2), plane 3 the least significant.
@@ -35,7 +40,7 @@ from torch.nn import functional as F
 
 from grn.models.sr_v2_calibrator import BoundedRoundCalibrator
 
-NEGATIVE_SOURCES = ('degraded_lr', 'calibrator')
+NEGATIVE_SOURCES = ('degraded_lr', 'calibrator', 'prompt', 'degraded_lr_prompt')
 NEGATIVE_SCHEMA = 'grn_s5_negative_calibrator_v1'
 PLANES, CHANNELS = 4, 64
 
@@ -69,7 +74,7 @@ class SRQualityGuidance:
     start               guidance acts on rounds whose input retention >= start.
     plane_weights       per-plane multiplier in [0,1]; default acts on the two
                         least significant planes only, which carry texture.
-    negative            'degraded_lr' or 'calibrator'.
+    negative            one of NEGATIVE_SOURCES (see the module docstring).
     lr_blur_sigma       Gaussian sigma in LR pixels for the degraded-LR branch.
     lr_downscale        optional extra bicubic down/up factor (>= 1) for it.
     plane_temperatures  None keeps the caller's sampler. Otherwise four values:
@@ -96,8 +101,8 @@ class SRQualityGuidance:
                            _finite_scalar('lr_downscale', lr_downscale, minimum=1., maximum=8.))
         object.__setattr__(self, 'plane_temperatures',
                            _plane_vector('plane_temperatures', plane_temperatures, minimum=0., maximum=8.))
-        if self.guides and self.negative == 'degraded_lr' and self.lr_blur_sigma == 0 and self.lr_downscale == 1:
-            raise ValueError('degraded_lr guidance needs lr_blur_sigma > 0 or lr_downscale > 1')
+        if self.guides and self.degrades_lr and self.lr_blur_sigma == 0 and self.lr_downscale == 1:
+            raise ValueError('degraded-LR guidance needs lr_blur_sigma > 0 or lr_downscale > 1')
 
     def __setattr__(self, name, value):
         raise AttributeError('SRQualityGuidance is immutable')
@@ -107,8 +112,19 @@ class SRQualityGuidance:
         return self.scale > 0 and self.bound > 0 and any(self.plane_weights)
 
     @property
+    def degrades_lr(self):
+        return self.negative in ('degraded_lr', 'degraded_lr_prompt')
+
+    @property
+    def uses_negative_text(self):
+        return self.negative in ('prompt', 'degraded_lr_prompt')
+
+    @property
     def needs_negative_lr(self):
-        return self.guides and self.negative == 'degraded_lr'
+        # True whenever the second packed branch supplies the negative
+        # prediction. It then needs its own LR input: a degraded one, or for
+        # 'prompt' the unchanged LR.
+        return self.guides and self.negative != 'calibrator'
 
     @property
     def needs_negative_calibrator(self):

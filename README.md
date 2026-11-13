@@ -70,6 +70,8 @@ l_g = l_pos + clamp(w * (l_pos - l_neg), -bound, +bound) * plane_weight
 |---|---|---|---|
 | `degraded_lr` | 同一模型 + 再退化的 LR（高斯模糊 / 下采样再上采样），占用原本被丢弃的第二条打包分支 | 无额外主干 token | 否 |
 | `calibrator` | 负校准器 C-（与 C 同结构，337K 参数），读同一份 hidden | 无额外主干前向 | 是，仅 C- |
+| `prompt` | 同一个 LR，只更换文本槽（空提示 / 负向 token / 负向文本提示），见下节 | 无额外主干 token | 视文本槽来源 |
+| `degraded_lr_prompt` | 再退化的 LR + 更换文本槽 | 无额外主干 token | 视文本槽来源 |
 
 ```bash
 # 1) 免训练：再退化 LR 作为负分支，只引导低两个位平面
@@ -96,6 +98,75 @@ l_g = l_pos + clamp(w * (l_pos - l_neg), -bound, +bound) * plane_weight
 数学自检（CPU，无需权重）：`./environment/python code/tools/test_sr_quality_guidance.py`。
 
 注意：引导会移动感知—失真工作点，PSNR / LPIPS 预期下降；启用后必须作为单独工作点报告并披露全部 `--qg-*` 设置。`cfg_list` 仍固定为 1，零前缀无条件分支从未训练，本功能不使用它。
+
+## 实验性：CLIP 语义提示（默认关闭）
+
+把图像级语义送进模型**原生的文本槽**，而不是加到 LR 锚点上。GRN 是文生图先验，序列末尾的文本 token（umT5 特征 4096 维，经 `text_proj`）被所有图像 token 注意；超分微调后这个槽里一直是同一个空提示 token。这里的做法：
+
+```
+LR 的 CLIP 图像嵌入  ->  小投影器  ->  文本槽 token
+```
+
+- `--tokens 1`（默认，“直接加”）：空提示 token 加一个学到的偏移，序列长度不变，未训练的投影器与原模型逐值一致。
+- `--tokens K`：K 个 token，各自是空提示 token 加偏移。
+- `--negative-every N`（可选，“学的”负向 token）：每 N 个样本用一个可学习的负向 token 去预测低质量目标（模糊 HR 的 bits），推理时作为引导的负分支。
+- 只训练投影器；主干、`text_proj`、C/R、HBQ、CLIP 全部冻结，所以“不带语义”的分支就是原模型本身。
+
+尚未在权重上验证，不附带任何质量结论。不传下列参数时推理行为与生成签名字段不变。
+
+```bash
+# 0) 数学自检（CPU，无需权重）
+./environment/python code/tools/test_sr_semantic_prompt.py
+
+# 1) 先探测：冻结主干还读不读文本槽（不训练，几分钟）
+./environment/python scripts/train_semantic.py --cache <teacher_cache>/cache.json \
+  --adapter outputs/trajectory_expanded_20261108/train_cr/adapter.pt \
+  --probe 8 --output outputs/semantic_probe --execute
+
+# 2) 训练语义提示（只训投影器；CLIP 权重必须在本包目录内）
+./environment/python scripts/train_semantic.py --cache <teacher_cache>/cache.json \
+  --adapter outputs/trajectory_expanded_20261108/train_cr/adapter.pt \
+  --clip protocol/offline_cache/clip/RN50.pt --tokens 1 --negative-every 4 \
+  --updates 2048 --accumulate 4 --output outputs/semantic_rn50 --execute
+
+# 3) 推理：只加语义
+./environment/python scripts/infer.py --benchmarks RealSR --indices 0,1,2,3 \
+  --adapter outputs/trajectory_expanded_20261108/train_cr/adapter.pt --kappa 2 \
+  --semantic-prompt outputs/semantic_rn50/semantic.pt --clip protocol/offline_cache/clip/RN50.pt \
+  --output outputs/sem_only
+
+# 4) 推理：语义 + 提示引导（第二分支同一个 LR，只换文本槽）
+./environment/python scripts/infer.py --benchmarks RealSR --indices 0,1,2,3 \
+  --adapter outputs/trajectory_expanded_20261108/train_cr/adapter.pt --kappa 2 \
+  --semantic-prompt outputs/semantic_rn50/semantic.pt --clip protocol/offline_cache/clip/RN50.pt \
+  --qg-negative prompt --qg-scale 2 --output outputs/sem_guided_w2
+```
+
+读结果：
+
+- 探测输出 `probe.json` 的 `mean_abs_shift` 是 log-odds 单位（C 的上界 κ=2 可作参照）。若远小于 0.01 且几乎没有 bit 翻转，说明冻结主干基本不读文本槽，仅训投影器不会有效，需要连主干一起适配。
+- 训练日志 `eval.jsonl` 在留出样本上比较 `clean_ce_semantic` 与 `clean_ce_empty`（语义 token 是否降低 bit 交叉熵），以及 `low_ce_negative` 与 `low_ce_empty`（负向 token 是否学到低质量方向）。两者都不降，就不必跑完整推理。
+- `clean_ce_shuffled` 是把别的图的语义 token 换给当前图的对照：若它与 `clean_ce_semantic` 相同，说明学到的只是一个常数 token，没有用到逐图语义，论文里就不能称为“语义”增益。`offset_rms` 是偏移量相对空提示 token 的幅度。
+- `--qg-negative prompt`：负分支文本槽依次取 `--negative-text-prompt`、已训练的负向 token、空提示。`degraded_lr_prompt` 同时退化 LR 并更换文本槽。
+
+**免训练对照：真实文本提示。** 文本槽也可以直接放 umT5 编码的真实提示（需要原始 umT5 权重），用来检验文生图先验是否还响应质量词：
+
+```bash
+./environment/python scripts/prepare_text_prompt.py --text-encoder <umt5 目录> \
+  --prompt "a sharp, highly detailed, high-resolution photograph" --output weights/prompts/quality_pos.pt
+./environment/python scripts/prepare_text_prompt.py --text-encoder <umt5 目录> \
+  --prompt "blurry, low resolution, noisy, jpeg artifacts" --output weights/prompts/quality_neg.pt
+./environment/python scripts/infer.py --benchmarks RealSR --indices 0,1,2,3 \
+  --adapter outputs/trajectory_expanded_20261108/train_cr/adapter.pt --kappa 2 \
+  --text-prompt weights/prompts/quality_pos.pt --negative-text-prompt weights/prompts/quality_neg.pt \
+  --qg-negative prompt --qg-scale 2 --output outputs/text_prompt_w2
+```
+
+注意：
+
+- `protocol/offline_cache/clip/RN50.pt` 同时是 CLIPIQA 指标的骨干。这里只把它当条件编码器读 LR，不以任何指标为训练目标；但正式结果建议换成 ViT-L/14（OpenAI `ViT-L-14.pt` 或 transformers 目录，放进本包后用 `--clip` 指定），并在论文中写明。
+- 语义提示与训练时并用的 C/R 适配器、CLIP 权重、空提示特征绑定，推理时不一致会拒绝加载。
+- 引导会移动感知—失真工作点；启用后必须作为单独工作点报告，并披露全部相关参数。
 
 ## 许可证
 

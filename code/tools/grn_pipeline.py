@@ -1,5 +1,6 @@
 import os
 import json
+import math
 import numpy as np
 import torch
 from PIL import Image
@@ -30,6 +31,9 @@ class GRNPipeline:
         self.sr_semantic_encoder = None
         if condition_config(args).semantic:
             self.sr_semantic_encoder = build_semantic_encoder(args, device)
+        # Optional CLIP semantic prompt for the text slot (sr_semantic_prompt.SemanticPrompt).
+        # None keeps the cached empty prompt, exactly as before.
+        self.sr_semantic_prompt = None
         self.video_encode, self.video_decode, self.get_visual_rope_embeds, self.get_scale_pack_info = \
             get_encode_decode_func(args.dynamic_scale_schedule)
 
@@ -206,7 +210,44 @@ class GRNPipeline:
             self.vae = self.vae.to(device)
         if self.sr_semantic_encoder is not None:
             self.sr_semantic_encoder = self.sr_semantic_encoder.to(device=device)
+        if self.sr_semantic_prompt is not None:
+            self.sr_semantic_prompt.to(device)
         return self
+
+    def _sr_text_conditions(self, lr_condition, guidance, semantic_scale, positive, negative):
+        """Text-slot features for the two packed SR branches.
+
+        Returns keyword arguments for ``gen_one_example``. An empty dict keeps
+        the cached empty prompt on both branches. ``positive`` / ``negative``
+        are optional explicit features [L, text_channels] (cached umT5 prompts).
+        """
+        if (isinstance(semantic_scale, bool) or not isinstance(semantic_scale, (int, float))
+                or not math.isfinite(semantic_scale) or semantic_scale < 0):
+            raise ValueError('sr_semantic_scale must be a finite nonnegative scalar')
+        runtime = self.sr_semantic_prompt
+        if runtime is not None and semantic_scale > 0:
+            if positive is not None:
+                raise ValueError('Use either a cached text prompt or the semantic prompt for the positive text slot')
+            positive, learned_negative = runtime.text_features(lr_condition, scale=float(semantic_scale))
+            if negative is None:
+                negative = learned_negative
+        second_branch = guidance is not None and guidance.needs_negative_lr
+        if second_branch and guidance.uses_negative_text:
+            if positive is None and negative is None:
+                raise ValueError("'prompt' guidance needs a semantic prompt or cached text prompts")
+            # negative None -> the cached empty prompt.
+        elif second_branch:
+            # Degraded-LR guidance: same text on both branches, so their
+            # difference isolates the effect of the LR degradation.
+            negative = positive
+        else:
+            negative = None  # the second branch is not used
+        result = {}
+        if positive is not None:
+            result['sr_text_features'] = positive
+        if negative is not None:
+            result['sr_negative_text_features'] = negative
+        return result
 
     def _prepare_lr_condition(self, lr_image):
         if isinstance(lr_image, (str, os.PathLike)):
@@ -273,6 +314,9 @@ class GRNPipeline:
         top_p=1.0,
         sr_calibrator_kappa=None,
         sr_quality_guidance=None,
+        sr_semantic_scale=1.0,
+        sr_text_features=None,
+        sr_negative_text_features=None,
         **kwargs
     ):
         if seed is not None:
@@ -315,13 +359,21 @@ class GRNPipeline:
                 semantic_kwargs['sr_quality_guidance'] = sr_quality_guidance
                 if sr_quality_guidance.needs_negative_lr:
                     # One extra LR encoding per image; the 50 rounds reuse it.
-                    negative_lr = degrade_lr_condition(lr_condition, sr_quality_guidance)
+                    # 'prompt' guidance keeps the LR anchor and changes only the text slot.
+                    degraded = sr_quality_guidance.degrades_lr
+                    negative_lr = degrade_lr_condition(lr_condition, sr_quality_guidance) if degraded else lr_condition
                     semantic_kwargs['sr_negative_lr_condition'] = negative_lr
                     if self.sr_semantic_encoder is not None:
-                        semantic_kwargs['sr_negative_semantic_features'] = self.sr_semantic_encoder(negative_lr)
+                        semantic_kwargs['sr_negative_semantic_features'] = (
+                            self.sr_semantic_encoder(negative_lr) if degraded
+                            else semantic_kwargs['sr_semantic_features'])
+            semantic_kwargs.update(self._sr_text_conditions(
+                lr_condition, sr_quality_guidance, sr_semantic_scale, sr_text_features, sr_negative_text_features))
             h_div_w, content_type, first_frame_condition = 1.0, 'image', False
         elif sr_quality_guidance is not None:
             raise ValueError('sr_quality_guidance is only defined for task SR')
+        elif sr_text_features is not None or sr_negative_text_features is not None:
+            raise ValueError('Text-slot features are only defined for task SR')
         elif prompt is None:
             raise ValueError("Text-conditioned generation requires prompt")
         

@@ -31,11 +31,19 @@ def main():
     parser.add_argument("--qg-bound", type=float, default=2.0, help="Largest absolute log-odds shift per bit")
     parser.add_argument("--qg-start", type=float, default=0.3, help="Guide rounds whose input retention is at least this")
     parser.add_argument("--qg-planes", default="0,0,1,1", help="Per-plane guidance weights, most significant plane first")
-    parser.add_argument("--qg-negative", choices=["degraded_lr", "calibrator"], default="degraded_lr")
+    parser.add_argument("--qg-negative", choices=["degraded_lr", "calibrator", "prompt", "degraded_lr_prompt"],
+                        default="degraded_lr")
     parser.add_argument("--qg-lr-sigma", type=float, default=1.2, help="Gaussian sigma (LR pixels) of the degraded-LR branch")
     parser.add_argument("--qg-lr-downscale", type=float, default=1.0, help="Extra bicubic down/up factor of the degraded-LR branch")
     parser.add_argument("--qg-negative-adapter", help="Project-local negative calibrator (C-) for --qg-negative calibrator")
     parser.add_argument("--plane-temperatures", help="Four per-plane sampling temperatures, 0 = greedy, e.g. 0,0,0.7,1")
+    # Opt-in text-slot conditioning: a trained CLIP semantic prompt or cached umT5
+    # prompts. Without these flags both branches keep the cached empty prompt.
+    parser.add_argument("--semantic-prompt", help="Project-local semantic prompt sidecar from scripts/train_semantic.py")
+    parser.add_argument("--clip", help="Project-local CLIP weights: an OpenAI .pt file or a transformers directory")
+    parser.add_argument("--semantic-scale", type=float, default=1.0, help="Semantic prompt strength; 0 disables it")
+    parser.add_argument("--text-prompt", help="Project-local cached umT5 prompt for the positive text slot")
+    parser.add_argument("--negative-text-prompt", help="Project-local cached umT5 prompt for the negative text slot")
     parser.add_argument("--preflight", action="store_true", help="Validate assets, runtime policy and pair counts without loading a model")
     args = parser.parse_args()
     if args.smoke and args.indices:
@@ -58,6 +66,33 @@ def main():
                                  else negative_adapter_path.resolve())
         if not negative_adapter_path.is_relative_to(ROOT) or not negative_adapter_path.is_file():
             raise ValueError("Negative calibrator must be an existing package-local file")
+
+    def project_path(value, description, *, directory=False):
+        if not value:
+            return None
+        path = Path(value).expanduser()
+        path = (ROOT / path).resolve() if not path.is_absolute() else path.resolve()
+        if not path.is_relative_to(ROOT) or not (path.is_file() or (directory and path.is_dir())):
+            raise ValueError(f"{description} must be an existing package-local path")
+        return path
+
+    semantic_path = project_path(args.semantic_prompt, "Semantic prompt")
+    clip_path = project_path(args.clip, "CLIP weights", directory=True)
+    text_prompt_path = project_path(args.text_prompt, "Text prompt cache")
+    negative_text_prompt_path = project_path(args.negative_text_prompt, "Negative text prompt cache")
+    if (semantic_path is None) != (clip_path is None):
+        parser.error("--semantic-prompt and --clip must be given together")
+    if semantic_path is not None and text_prompt_path is not None:
+        parser.error("Use either --semantic-prompt or --text-prompt for the positive text slot")
+    if not math.isfinite(args.semantic_scale) or args.semantic_scale < 0:
+        parser.error("--semantic-scale must be finite and nonnegative")
+    clip_weight_path = clip_path
+    if clip_path is not None and clip_path.is_dir():
+        clip_weight_path = next((clip_path / name for name in ("model.safetensors", "pytorch_model.bin")
+                                 if (clip_path / name).is_file()), None)
+        if clip_weight_path is None:
+            parser.error("--clip directory has no model.safetensors or pytorch_model.bin")
+    text_slot_used = any(path is not None for path in (semantic_path, text_prompt_path, negative_text_prompt_path))
     import torch
     quality_guidance = None
     if args.qg_scale > 0 or args.plane_temperatures:
@@ -69,6 +104,9 @@ def main():
             parser.error("--qg-negative calibrator requires --adapter and --qg-negative-adapter")
     if negative_adapter_path is not None and (quality_guidance is None or not quality_guidance.needs_negative_calibrator):
         parser.error("--qg-negative-adapter requires --qg-scale > 0 with --qg-negative calibrator")
+    if (quality_guidance is not None and quality_guidance.needs_negative_lr
+            and quality_guidance.uses_negative_text and not text_slot_used):
+        parser.error("--qg-negative prompt needs --semantic-prompt, --text-prompt or --negative-text-prompt")
     numeric_policy = {
         "backend": os.environ.get("GRN_S5_BACKEND", "unknown"), "torch": torch.__version__,
         "cuda": torch.version.cuda, "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
@@ -134,6 +172,15 @@ def main():
                         "path": str(negative_adapter_path.relative_to(ROOT)),
                         "bytes": negative_adapter_path.stat().st_size,
                         "sha256": sha256(negative_adapter_path)}}
+            if text_slot_used:
+                # Added only when requested: default runs keep their old signature.
+                def file_identity(path):
+                    return None if path is None else {"path": str(path.relative_to(ROOT)),
+                                                      "bytes": path.stat().st_size, "sha256": sha256(path)}
+                signature["adaptation"]["text_slot"] = {
+                    "semantic_prompt": file_identity(semantic_path), "clip": file_identity(clip_weight_path),
+                    "semantic_scale": args.semantic_scale, "text_prompt": file_identity(text_prompt_path),
+                    "negative_text_prompt": file_identity(negative_text_prompt_path)}
         except Exception as error:
             validation_error = f"{type(error).__name__}: {error}"
     if args.preflight:
@@ -222,6 +269,33 @@ def main():
     adaptation_kwargs = {} if args.kappa is None else {"sr_calibrator_kappa": args.kappa}
     if quality_guidance is not None:
         adaptation_kwargs["sr_quality_guidance"] = quality_guidance
+    semantic_report = None
+    if text_slot_used:
+        from grn.models.sr_semantic_prompt import (FrozenCLIPImageEncoder, SemanticPrompt,
+                                                   load_semantic_prompt, load_text_prompt_cache)
+        recorded = signature["adaptation"]["text_slot"]
+        for path, key in ((semantic_path, "semantic_prompt"), (text_prompt_path, "text_prompt"),
+                          (negative_text_prompt_path, "negative_text_prompt")):
+            if path is not None and sha256(path) != recorded[key]["sha256"]:
+                raise ValueError(f"{key} changed after preflight")
+        if semantic_path is not None:
+            from grn.utils_t2iv.sr_native import load_empty_text_cache
+            clip_encoder = FrozenCLIPImageEncoder(clip_path)
+            if clip_encoder.weight_sha256 != recorded["clip"]["sha256"]:
+                raise ValueError("CLIP weights changed after preflight")
+            empty_features = load_empty_text_cache(str(assets["empty_text"]), 4096)
+            projector, semantic_report = load_semantic_prompt(
+                semantic_path, expected_base_sha256=signature["assets"]["checkpoint"]["sha256"],
+                expected_adapter_sha256=(None if adapter_path is None else signature["adaptation"]["adapter"]["sha256"]),
+                clip_identity=clip_encoder.identity(), empty_features=empty_features)
+            pipeline.sr_semantic_prompt = SemanticPrompt(
+                clip_encoder, projector, empty_features,
+                negative_trained=semantic_report["negative_trained"]).to(torch.device(device))
+            adaptation_kwargs["sr_semantic_scale"] = args.semantic_scale
+        if text_prompt_path is not None:
+            adaptation_kwargs["sr_text_features"] = load_text_prompt_cache(text_prompt_path)[0]
+        if negative_text_prompt_path is not None:
+            adaptation_kwargs["sr_negative_text_features"] = load_text_prompt_cache(negative_text_prompt_path)[0]
     sampling = CONFIG["sampling"]
     for number, record in enumerate(records):
         if number % world_size != rank:
@@ -265,6 +339,7 @@ def main():
                                   "elapsed_seconds_including_model_load": time.time() - started,
                                   "adapter_load": adapter_report,
                                   "negative_adapter_load": negative_report,
+                                  "semantic_prompt_load": semantic_report,
                                   "note": "Original benchmark indices are preserved; no RGB postprocessing or color correction."})
     if world_size > 1:
         distributed.destroy_process_group()
