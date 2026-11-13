@@ -56,6 +56,47 @@ export GRN_S5_DETERMINISTIC=1
 
 上述命令不是“仅clone源码即可运行”的承诺。正式入口、配置和冻结模型源码均保留原样，方便与已有实验包核对。
 
+## 实验性：质量对比修订引导（默认关闭）
+
+用于提升无参考指标（MANIQA / CLIPIQA / MUSIQ）的可选推理控制。**不传任何 `--qg-*` / `--plane-temperatures` 参数时，采样语句与生成签名字段均与原版一致**（源码哈希会因文件改动而变化）。尚未在权重上验证，不附带任何质量结论。
+
+每轮对全部 bit 的 log-odds 做有界外推，远离一个“低质量”预测：
+
+```
+l_g = l_pos + clamp(w * (l_pos - l_neg), -bound, +bound) * plane_weight
+```
+
+| 负分支 | 来源 | 额外开销 | 需要训练 |
+|---|---|---|---|
+| `degraded_lr` | 同一模型 + 再退化的 LR（高斯模糊 / 下采样再上采样），占用原本被丢弃的第二条打包分支 | 无额外主干 token | 否 |
+| `calibrator` | 负校准器 C-（与 C 同结构，337K 参数），读同一份 hidden | 无额外主干前向 | 是，仅 C- |
+
+```bash
+# 1) 免训练：再退化 LR 作为负分支，只引导低两个位平面
+./environment/python scripts/infer.py --benchmarks RealSR --indices 0,1,2,3 \
+  --adapter outputs/trajectory_expanded_20261108/train_cr/adapter.pt --kappa 2 \
+  --qg-scale 2 --qg-bound 2 --qg-start 0.3 --qg-planes 0,0,1,1 \
+  --qg-negative degraded_lr --qg-lr-sigma 1.2 --output outputs/qg_lr_w2
+
+# 2) 免训练：分位平面采样（0 = argmax；可与引导同时使用）
+./environment/python scripts/infer.py --benchmarks RealSR --indices 0,1,2,3 \
+  --adapter outputs/trajectory_expanded_20261108/train_cr/adapter.pt --kappa 2 \
+  --plane-temperatures 0,0,0.7,1 --output outputs/plane_t
+
+# 3) 训练负校准器 C-（复用已有教师缓存，不跑主干），再用它做引导
+./environment/python scripts/train_negative.py --cache <teacher_cache>/cache.json \
+  --adapter outputs/trajectory_expanded_20261108/train_cr/adapter.pt \
+  --target blur --blur-sigma 2.0 --output outputs/negative_blur2 --execute
+./environment/python scripts/infer.py --benchmarks RealSR --indices 0,1,2,3 \
+  --adapter outputs/trajectory_expanded_20261108/train_cr/adapter.pt --kappa 2 \
+  --qg-scale 2 --qg-negative calibrator \
+  --qg-negative-adapter outputs/negative_blur2/negative.pt --output outputs/qg_cneg_w2
+```
+
+数学自检（CPU，无需权重）：`./environment/python code/tools/test_sr_quality_guidance.py`。
+
+注意：引导会移动感知—失真工作点，PSNR / LPIPS 预期下降；启用后必须作为单独工作点报告并披露全部 `--qg-*` 设置。`cfg_list` 仍固定为 1，零前缀无条件分支从未训练，本功能不使用它。
+
 ## 许可证
 
 GRN原MIT许可证保留于根目录和 `code/LICENSE`；协议/相关上游代码的原许可证保留于 `protocol/LICENSE`。

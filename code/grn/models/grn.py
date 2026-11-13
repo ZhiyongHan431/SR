@@ -1234,6 +1234,9 @@ class GRN(nn.Module):
         lr_condition: Optional[torch.Tensor] = None,
         sr_semantic_features: Optional[torch.Tensor] = None,
         sr_calibrator_kappa: Optional[float] = None,
+        sr_quality_guidance: Optional[Any] = None,
+        sr_negative_lr_condition: Optional[torch.Tensor] = None,
+        sr_negative_semantic_features: Optional[torch.Tensor] = None,
         **kwargs: Any,
     ):
         """Autoregressive inference loop for the GRN model."""
@@ -1254,6 +1257,32 @@ class GRN(nn.Module):
         if calibration_enabled and (lr_condition is None
                 or not cfg_list or any(float(cfg) != 1.0 for cfg in cfg_list)):
             raise ValueError('S3 inference requires LR and guidance=1; CFG is not validated')
+        # Opt-in quality-contrastive guidance. It is separate from cfg_list, which
+        # stays at 1: the zero-prefix unconditional branch was never trained.
+        quality_guidance = sr_quality_guidance
+        if quality_guidance is None:
+            if sr_negative_lr_condition is not None or sr_negative_semantic_features is not None:
+                raise ValueError('Negative LR inputs require sr_quality_guidance')
+        else:
+            from grn.models.sr_quality_guidance import (
+                SRQualityGuidance, guided_logits, sample_bits_by_plane)
+            if not isinstance(quality_guidance, SRQualityGuidance):
+                raise ValueError('sr_quality_guidance must be an SRQualityGuidance')
+            if (lr_condition is None or self.sr_condition_mode != 'prefix_text' or first_frame_condition
+                    or getattr(args, 'refine_mode', None) != 'ar_discrete_GRN_bit'
+                    or any(float(cfg) != 1.0 for cfg in cfg_list)):
+                raise ValueError('Quality guidance requires prefix_text image SR, binary refinement and guidance=1')
+            if quality_guidance.needs_negative_lr:
+                if (sr_negative_lr_condition is None
+                        or sr_negative_lr_condition.shape != lr_condition.shape):
+                    raise ValueError('degraded_lr guidance requires a negative LR with the LR shape')
+                self._validate_sr_v2_semantic_condition(
+                    sr_negative_lr_condition, sr_negative_semantic_features)
+            elif sr_negative_lr_condition is not None or sr_negative_semantic_features is not None:
+                raise ValueError('This guidance setting does not use a negative LR')
+            if quality_guidance.needs_negative_calibrator and (
+                    not calibration_enabled or not hasattr(self, 'sr_negative_calibrator')):
+                raise ValueError('calibrator guidance requires loaded positive and negative calibrators')
         native_lr_input = kwargs.pop('native_lr_input', None)
         use_native_condition = native_lr_input is not None
         if use_native_condition:
@@ -1312,6 +1341,14 @@ class GRN(nn.Module):
                 sr_prefix_cond = self.encode_lr_condition(
                     lr_condition, target_hw=(ph, pw), sr_semantic_features=sr_semantic_features)
             sr_prefix_uncond = torch.zeros_like(sr_prefix_cond)
+            sr_negative_latent = None
+            if quality_guidance is not None and quality_guidance.needs_negative_lr:
+                # The second packed branch is computed at guidance=1 anyway and
+                # then discarded. Give it a further-degraded LR instead of zeros.
+                sr_prefix_uncond, sr_negative_latent = self.encode_lr_condition(
+                    sr_negative_lr_condition, target_hw=(ph, pw), return_latent=True,
+                    sr_semantic_features=sr_negative_semantic_features)
+                sr_prefix_uncond = sr_prefix_uncond.to(dtype=sr_prefix_cond.dtype)
             lr_memory = torch.cat((sr_prefix_cond, sr_prefix_uncond), dim=0)
             lens = [0, 0]
             device = sr_prefix_cond.device
@@ -1461,6 +1498,8 @@ class GRN(nn.Module):
             pred_uncond_logits = logits[
                 :, uncond_target_start:uncond_target_start + mul_pt_ph_pw
             ]
+            guide_this_round = quality_guidance is not None and quality_guidance.active_at(cur_pt)
+            head_cond_logits = pred_cond_logits
             if calibration_enabled:
                 pred_cond_logits = self._calibrate_sr_hr_logits(
                     pred_cond_logits.permute(0, 3, 1, 2),
@@ -1469,6 +1508,26 @@ class GRN(nn.Module):
                     last_stage.new_tensor([cur_pt], dtype=torch.float32),
                     **calibration_kwargs,
                 ).permute(0, 2, 3, 1)
+            if guide_this_round:
+                retention = last_stage.new_tensor([cur_pt], dtype=torch.float32)
+                if quality_guidance.needs_negative_lr:
+                    negative_logits = pred_uncond_logits
+                    if calibration_enabled:
+                        # Same calibrator and kappa on both branches, so their
+                        # difference isolates the effect of the LR degradation.
+                        negative_logits = self._calibrate_sr_hr_logits(
+                            negative_logits.permute(0, 3, 1, 2),
+                            last_stage[:, uncond_target_start:uncond_target_start + mul_pt_ph_pw],
+                            sr_negative_latent, retention, **calibration_kwargs,
+                        ).permute(0, 2, 3, 1)
+                else:
+                    # C- reads the same hidden states and head logits as C.
+                    negative_logits = self.sr_negative_calibrator.calibrate_logits(
+                        head_cond_logits.permute(0, 3, 1, 2),
+                        last_stage[:, target_token_offset:target_token_offset + mul_pt_ph_pw],
+                        sr_calibrator_latent, retention, **calibration_kwargs,
+                    ).permute(0, 2, 3, 1)
+                pred_cond_logits = guided_logits(pred_cond_logits, negative_logits, quality_guidance)
             pred_cond_probs = pred_cond_logits.softmax(-1) # [B,thw,d,2]
             categories = pred_cond_logits.shape[-1]
             entrophy = (-pred_cond_probs * torch.log2(pred_cond_probs)).sum(-1).mean().item() / np.log2(categories)
@@ -1488,7 +1547,12 @@ class GRN(nn.Module):
             pred_cfg_probs = pred_cfg_logits.softmax(dim=-1) # [B,thw,d,2]
             pred_cfg_labels = torch.argmax(pred_cfg_probs, dim=-1) # [B,thw,d]
             pred_cfg_labels = bld_to_bthwd(pred_cfg_labels, pt, ph, pw) # [B,t,h,w,d]
-            if int(getattr(args, 'sr_top_k', 0)) == 1:
+            plane_sample_probs = None
+            if quality_guidance is not None and quality_guidance.plane_temperatures is not None:
+                # Per-plane greedy/stochastic decisions replace the global sampler.
+                pred_sample_labels, plane_sample_probs = sample_bits_by_plane(
+                    pred_cfg_logits, quality_guidance.plane_temperatures, rng)
+            elif int(getattr(args, 'sr_top_k', 0)) == 1:
                 pred_sample_labels = pred_cfg_probs.argmax(dim=-1)
             else:
                 pred_sample_labels = torch.multinomial(
@@ -1498,6 +1562,8 @@ class GRN(nn.Module):
                     generator=rng,
                 ).view(tmp_bs, mul_pt_ph_pw, -1)
             pred_sample_probs = torch.gather(pred_cfg_probs, dim=3, index=pred_sample_labels.unsqueeze(-1)).squeeze(-1) # [B,thw,d]
+            if plane_sample_probs is not None:
+                pred_sample_probs = plane_sample_probs.to(dtype=pred_sample_probs.dtype)
             pred_sample_probs = bld_to_bthwd(pred_sample_probs, pt, ph, pw) # [B,t,h,w,d]
             pred_sample_labels = bld_to_bthwd(pred_sample_labels, pt, ph, pw) # [B,t,h,w,d]
 

@@ -272,6 +272,7 @@ class GRNPipeline:
         top_k=0,
         top_p=1.0,
         sr_calibrator_kappa=None,
+        sr_quality_guidance=None,
         **kwargs
     ):
         if seed is not None:
@@ -307,7 +308,20 @@ class GRNPipeline:
                 # Exactly one semantic encoding of the normalized real LR per
                 # pipeline call; recurrent GRN refinement reuses these features.
                 semantic_kwargs['sr_semantic_features'] = self.sr_semantic_encoder(lr_condition)
+            if sr_quality_guidance is not None:
+                from grn.models.sr_quality_guidance import SRQualityGuidance, degrade_lr_condition
+                if not isinstance(sr_quality_guidance, SRQualityGuidance):
+                    raise ValueError('sr_quality_guidance must be an SRQualityGuidance')
+                semantic_kwargs['sr_quality_guidance'] = sr_quality_guidance
+                if sr_quality_guidance.needs_negative_lr:
+                    # One extra LR encoding per image; the 50 rounds reuse it.
+                    negative_lr = degrade_lr_condition(lr_condition, sr_quality_guidance)
+                    semantic_kwargs['sr_negative_lr_condition'] = negative_lr
+                    if self.sr_semantic_encoder is not None:
+                        semantic_kwargs['sr_negative_semantic_features'] = self.sr_semantic_encoder(negative_lr)
             h_div_w, content_type, first_frame_condition = 1.0, 'image', False
+        elif sr_quality_guidance is not None:
+            raise ValueError('sr_quality_guidance is only defined for task SR')
         elif prompt is None:
             raise ValueError("Text-conditioned generation requires prompt")
         
