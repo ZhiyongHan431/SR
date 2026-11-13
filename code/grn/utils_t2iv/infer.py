@@ -77,6 +77,9 @@ def gen_one_example(
     lr_condition=None,
     sr_semantic_features=None,
     sr_calibrator_kappa=None,
+    sr_quality_guidance=None,
+    sr_negative_lr_condition=None,
+    sr_negative_semantic_features=None,
 ):
     sstt = time.time()
     if not isinstance(cfg_list, list):
@@ -107,6 +110,16 @@ def gen_one_example(
     if sr_calibrator_kappa is not None:
         from grn.models.sr_v2_calibrator import resolve_calibrator_kappa
         semantic_kwargs['sr_calibrator_kappa'] = resolve_calibrator_kappa(sr_calibrator_kappa)
+    # Opt-in quality guidance: forwarded only when requested, so the default
+    # call keeps its historical keyword set.
+    if sr_quality_guidance is not None:
+        semantic_kwargs['sr_quality_guidance'] = sr_quality_guidance
+        if sr_negative_lr_condition is not None:
+            semantic_kwargs['sr_negative_lr_condition'] = sr_negative_lr_condition
+        if sr_negative_semantic_features is not None:
+            semantic_kwargs['sr_negative_semantic_features'] = sr_negative_semantic_features
+    elif sr_negative_lr_condition is not None or sr_negative_semantic_features is not None:
+        raise ValueError('Negative LR inputs require sr_quality_guidance')
     print(f'cfg: {cfg_list}, tau: {tau_list}')
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16, cache_enabled=True):
         stt = time.time()
